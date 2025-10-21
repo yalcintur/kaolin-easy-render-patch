@@ -369,18 +369,28 @@ def orbit_camera_from_params(base_camera, phi, theta, radius=2, device='cuda'):
         intrinsics=base_camera.intrinsics
     ).to(device)
 
-def current_lighting(azimuth, elevation, amplitude, sharpness):
-    """ Convert slider lighting parameters to paramater class used for rendering."""
-    direction = kal.render.lighting.sg_direction_from_azimuth_elevation(azimuth, elevation)
+
+def current_lighting(camera, amplitude=1.0, sharpness=64.0):
+    camera_forward = torch.tensor([0.0, 0.0, -1.0], device=camera.device, dtype=torch.float32).view(1, 3, 1)  # (1,3,1)
+    R = camera.extrinsics.R
+    if R.ndim == 2:
+        R = R.unsqueeze(0)
+
+    direction_world = torch.matmul(R.transpose(1, 2), camera_forward).squeeze(-1)
+    direction_world = torch.nn.functional.normalize(direction_world, dim=-1)
+
     return kal.render.lighting.SgLightingParameters(
-        amplitude=amplitude, sharpness=sharpness, direction=direction)
+        amplitude=torch.tensor(amplitude, device=camera.device),
+        sharpness=torch.tensor(sharpness, device=camera.device),
+        direction=direction_world  # (1,3)
+    )
 
 def render(camera, azimuth, elevation, amplitude, sharpness, mesh, active_pass):
     """Render the mesh and its bundled materials.
     
     This is the main function provided to the interactive visualizer
     """
-    render_res = render_mesh(camera, mesh, lighting=current_lighting(azimuth, elevation, amplitude, sharpness), backend='cuda')
+    render_res = render_mesh(camera, mesh, lighting=current_lighting(camera, amplitude, sharpness), backend='cuda')
 
     face_idx = render_res.get(kal.render.easy_render.RenderPass.face_idx, render_res.get('face_idx'))
     normals  = render_res.get(kal.render.easy_render.RenderPass.normals, render_res.get('normals'))
